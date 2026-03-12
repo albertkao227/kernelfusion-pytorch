@@ -2,7 +2,7 @@
 Dataset for extracting patches from a single SEM image.
 
 Supports two modes:
-  - 'random': Random 64×64 crops (used for Phase 1 training, paper default)
+  - 'random': Random 64×64 crops with augmentation (used for Phase 1 training)
   - 'sliding': Sliding window patches (alternative for exhaustive coverage)
 """
 
@@ -25,7 +25,7 @@ class SEMPatchDataset(Dataset):
     """
     
     def __init__(self, image_path, patch_size=64, stride=16, mode='random', 
-                 virtual_size=10000):
+                 virtual_size=100_000, augment=True):
         """
         Args:
             image_path: Path to 16-bit grayscale SEM image
@@ -33,10 +33,12 @@ class SEMPatchDataset(Dataset):
             stride: Stride for sliding window mode
             mode: 'random' (paper default) or 'sliding'
             virtual_size: Virtual dataset size for random mode
+            augment: Apply random flips + 90° rotations (random mode only)
         """
         self.patch_size = patch_size
         self.mode = mode
         self.virtual_size = virtual_size
+        self.augment = augment
         
         # Load the full image
         self.img_tensor = load_sem_16bit(image_path, device='cpu')  # [1, 1, H, W]
@@ -71,6 +73,17 @@ class SEMPatchDataset(Dataset):
             y = np.random.randint(0, self.H - self.patch_size + 1)
             x = np.random.randint(0, self.W - self.patch_size + 1)
             patch = self.img_tensor[0, :, y:y+self.patch_size, x:x+self.patch_size]
+
+            # Data augmentation: random flips + 90° rotations (8 orientations)
+            if self.augment:
+                if np.random.rand() > 0.5:
+                    patch = torch.flip(patch, dims=[-1])   # horizontal flip
+                if np.random.rand() > 0.5:
+                    patch = torch.flip(patch, dims=[-2])   # vertical flip
+                k = np.random.randint(0, 4)
+                if k > 0:
+                    patch = torch.rot90(patch, k, dims=[-2, -1])
+
             return patch  # [1, patch_size, patch_size]
         else:
             return self.patches[idx]  # [1, patch_size, patch_size]

@@ -33,6 +33,9 @@ class TimestepConditionedBlock(nn.Module):
         self.t_proj = nn.Linear(t_emb_dim, out_channels)
         
         self.act = nn.GELU()
+        
+        # Residual connection when dimensions match
+        self.residual = (in_channels == out_channels)
     
     def forward(self, x, t_emb):
         """
@@ -47,6 +50,11 @@ class TimestepConditionedBlock(nn.Module):
         h = h + t_scale
         
         h = self.act(self.conv2(h))
+        
+        # Skip connection for gradient flow (blocks 1-6 where channels match)
+        if self.residual:
+            h = h + x
+        
         return h
 
 
