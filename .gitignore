@@ -2,6 +2,7 @@
 # Image data (input/output)
 data/images/
 samples/
+checkpoints/
 eval_output*
 
 # Byte-compiled / optimized / DLL files
