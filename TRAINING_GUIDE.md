@@ -1,13 +1,13 @@
 # KernelFusion: Training Guide
 
-> Based on the paper: *KernelFusion — Assumption-Free Blind Super-Resolution for SEM Images Using Internal Patch Diffusion*
+> Based on the paper: *KernelFusion — Assumption-Free Blind Super-Resolution Using Internal Patch Diffusion*
 > ([OpenReview](https://openreview.net/pdf?id=wED9O48qmH))
 
 ---
 
 ## Overview
 
-KernelFusion is a **zero-shot**, two-phase super-resolution method for 16-bit grayscale SEM images. It requires **no external training data** — only the single low-resolution (LR) input image.
+KernelFusion is a **zero-shot**, two-phase super-resolution method for 16-bit grayscale images. It requires **no external training data** — only the single low-resolution (LR) input image.
 
 ```
 ┌────────────────────────────────────────────────────────────────────┐
@@ -215,7 +215,7 @@ kernelfusion-pytorch/
 │   └── siren.py             # SIREN INR for kernel estimation (Phase 2)
 ├── data/
 │   ├── preprocess.py        # Color → 16-bit grayscale conversion
-│   ├── dataset.py           # SEMPatchDataset (random/sliding patches)
+│   ├── dataset.py           # PatchDataset (random/sliding patches)
 │   └── images/              # Input images
 └── utils/
     ├── image_utils.py       # 16-bit I/O, patch extraction
