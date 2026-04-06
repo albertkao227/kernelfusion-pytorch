@@ -1,3 +1,9 @@
+
+# Image data (input/output)
+data/images/
+samples/
+eval_output*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -210,5 +216,4 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 
-# Image data (input/output)
-data/images/
+
