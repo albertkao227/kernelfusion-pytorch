@@ -3,6 +3,7 @@
 data/images/
 samples/
 checkpoints/
+pd_checkpoints*
 eval_output*
 
 # Byte-compiled / optimized / DLL files
