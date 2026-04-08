@@ -55,3 +55,10 @@ class SIRENKernel(nn.Module):
         
         # Expand for depthwise convolution across RGB channels
         return kernel.expand(self.channels, 1, self.kernel_size, self.kernel_size)
+
+    def get_kernel_numpy(self):
+        """Get the current kernel as a numpy array for visualization."""
+        with torch.no_grad():
+            kernel = self.forward()
+            # squeeze() removes the batch and channel dimensions so matplotlib can plot it
+            return kernel.squeeze().cpu().numpy()
