@@ -3,43 +3,68 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
-from torchvision import transforms
+import torchvision.transforms.functional as TF
 from PIL import Image
+import numpy as np
 import math
 import random
 from diffusers import UNet2DModel 
 
 # -------------------------------------------------------------
-# 1. Single Image Patch Dataset
+# 1. Single Image Patch Dataset (1-Channel, 8/16-bit Supported)
 # -------------------------------------------------------------
 class SingleImagePatchDataset(Dataset):
     def __init__(self, image_path, patch_size=64, length=600000):
         super().__init__()
-        self.image = Image.open(image_path).convert('RGB')
         self.patch_size = patch_size
         self.length = length
-        self.transform = transforms.ToTensor()
+        
+        # Load image and convert to numpy array to inspect raw bit depth
+        img = Image.open(image_path)
+        img_np = np.array(img)
+        
+        # If the image has 3/4 channels (e.g., RGB/RGBA), convert to grayscale by averaging
+        if img_np.ndim == 3:
+            img_np = np.mean(img_np, axis=-1)
+            
+        # Normalize to [0, 1] based on the original data type
+        # Check for 16-bit (uint16 or PIL's typical fallback int32 for 16-bit modes)
+        if img.mode.startswith('I') or img_np.dtype == np.uint16 or img_np.dtype == np.int32:
+            img_np = img_np.astype(np.float32) / 65535.0
+        else:
+            # Default to 8-bit normalization
+            img_np = img_np.astype(np.float32) / 255.0
+            
+        # Add channel dimension to make it (1, H, W)
+        self.image_tensor = torch.from_numpy(img_np).unsqueeze(0)
         
     def __len__(self):
         return self.length
         
     def __getitem__(self, idx):
-        w, h = self.image.size
+        img_tensor = self.image_tensor
+        _, h, w = img_tensor.shape
         
+        # Resize if the original image is smaller than the required patch size
         if w < self.patch_size or h < self.patch_size:
-            self.image = self.image.resize((max(w, self.patch_size), max(h, self.patch_size)))
-            w, h = self.image.size
+            new_h = max(h, self.patch_size)
+            new_w = max(w, self.patch_size)
+            img_tensor = TF.resize(img_tensor, [new_h, new_w], antialias=True)
+            _, h, w = img_tensor.shape
             
-        x = random.randint(0, w - self.patch_size)
+        # Random crop
         y = random.randint(0, h - self.patch_size)
-        patch = self.image.crop((x, y, x + self.patch_size, y + self.patch_size))
+        x = random.randint(0, w - self.patch_size)
+        patch = TF.crop(img_tensor, y, x, self.patch_size, self.patch_size)
         
+        # Random augments
         if random.random() > 0.5:
-            patch = patch.transpose(Image.FLIP_LEFT_RIGHT)
+            patch = TF.hflip(patch)
         if random.random() > 0.5:
-            patch = patch.transpose(Image.FLIP_TOP_BOTTOM)
+            patch = TF.vflip(patch)
             
-        tensor_patch = self.transform(patch) * 2.0 - 1.0 
+        # Scale range from [0, 1] to [-1, 1] for diffusion
+        tensor_patch = patch * 2.0 - 1.0 
         return tensor_patch
 
 # -------------------------------------------------------------
@@ -74,7 +99,8 @@ class SinusoidalPositionEmbeddings(nn.Module):
 
 
 class PatchUNet(nn.Module):
-    def __init__(self, in_channels=3, base_channels=64):
+    # CHANGED: Default in_channels to 1
+    def __init__(self, in_channels=1, base_channels=64):
         super().__init__()
         self.time_mlp = nn.Sequential(
             SinusoidalPositionEmbeddings(base_channels),
@@ -127,23 +153,6 @@ class PatchUNet(nn.Module):
         
         return self.outc(x)
 
-
-    def forward(self, x, t):
-        t_emb = self.time_mlp(t)
-        
-        x1 = F.relu(self.inc(x))
-        x2 = F.relu(self.down1(x1))
-        
-        x2 = x2 + self.time_emb1(t_emb)[:, :, None, None]
-        
-        x3 = F.relu(self.down2(x2))
-        x3 = x3 + self.time_emb2(t_emb)[:, :, None, None]
-        
-        x = F.relu(self.up1(x3))
-        x = F.relu(self.up2(x))
-        
-        return self.outc(x)
-
 # -------------------------------------------------------------
 # 4. Phase 1 Training Loop with Checkpointing
 # -------------------------------------------------------------
@@ -156,8 +165,8 @@ def train_phase_1(image_path, batch_size=16, total_steps=600000, save_interval=5
     # ---------------------------------------------------------
     model = UNet2DModel(
         sample_size=64,           # Target image resolution
-        in_channels=3,            # RGB input
-        out_channels=3,           # RGB output (velocity prediction)
+        in_channels=1,            # CHANGED TO 1: Grayscale input
+        out_channels=1,           # CHANGED TO 1: Grayscale output (velocity prediction)
         layers_per_block=2,       # Number of ResNet blocks per layer
         block_out_channels=(64, 128, 256, 512), # Feature map channels
         down_block_types=(
@@ -204,7 +213,7 @@ def train_phase_1(image_path, batch_size=16, total_steps=600000, save_interval=5
         v_target = sqrt_alpha_t * noise - sqrt_one_minus_alpha_t * x_0
         
         # ---------------------------------------------------------
-        # NEW: Diffusers UNet returns an object, we want .sample
+        # Diffusers UNet returns an object, we want .sample
         # ---------------------------------------------------------
         v_pred = model(x_t, t).sample 
         
@@ -233,5 +242,4 @@ def train_phase_1(image_path, batch_size=16, total_steps=600000, save_interval=5
 
 if __name__ == "__main__":
     # Example usage: Save a checkpoint every 50,000 steps up to 600,000
-    train_phase_1("data/images/lena_color.tiff", batch_size=16, total_steps=200000, save_interval=20000, save_dir="pd_checkpoints_diffuser")
-    pass
+    train_phase_1(r"data/images/TEMgrid01.TIF", batch_size=16, total_steps=200001, save_interval=15000, save_dir="pd_checkpoints_diffuser")
