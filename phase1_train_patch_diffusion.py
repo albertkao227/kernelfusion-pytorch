@@ -242,4 +242,4 @@ def train_phase_1(image_path, batch_size=16, total_steps=600000, save_interval=5
 
 if __name__ == "__main__":
     # Example usage: Save a checkpoint every 50,000 steps up to 600,000
-    train_phase_1(r"data/images/TEMgrid01.TIF", batch_size=16, total_steps=200001, save_interval=15000, save_dir="pd_checkpoints_diffuser")
+    train_phase_1(r"data/images/lena_gray16.tiff", batch_size=16, total_steps=200001, save_interval=50000, save_dir="pd_checkpoints_diffuser")
