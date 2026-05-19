@@ -1,12 +1,14 @@
 import os
 import torch
 import math
+import numpy as np
 import random
 import matplotlib.pyplot as plt
 from PIL import Image
 from torchvision import transforms
 from torchvision.utils import make_grid
 from diffusers import UNet2DModel
+import torchvision.transforms.functional as TF
 
 # -------------------------------------------------------------
 # 1. Reverse Diffusion Math (DDPM for v-prediction)
@@ -65,7 +67,9 @@ def p_sample(model, x, t_index, betas, alphas, alphas_cumprod, sqrt_alphas_cumpr
 def generate_patches(model, num_patches=16, patch_size=64, num_timesteps=1000, device='cuda'):
     """Generates patches from pure noise."""
     model.eval()
-    x = torch.randn(num_patches, 3, patch_size, patch_size, device=device)
+    
+    # FIX 1: Generate 1-channel noise instead of 3-channel
+    x = torch.randn(num_patches, 1, patch_size, patch_size, device=device)
     
     betas, alphas, alphas_cumprod, sqrt_alphas_cumprod, sqrt_one_minus_alphas_cumprod = get_ddpm_schedule(num_timesteps)
     
@@ -89,17 +93,49 @@ def generate_patches(model, num_patches=16, patch_size=64, num_timesteps=1000, d
 # -------------------------------------------------------------
 # 2. Extract Real Patches for Comparison
 # -------------------------------------------------------------
+
+# def get_real_patches(image_path, num_patches=16, patch_size=64):
+#     # FIX 2: Convert to grayscale ('L') instead of 'RGB'
+#     image = Image.open(image_path).convert('L')
+#     transform = transforms.ToTensor()
+#     w, h = image.size
+#     patches = []
+#     for _ in range(num_patches):
+#         x = random.randint(0, max(0, w - patch_size))
+#         y = random.randint(0, max(0, h - patch_size))
+#         patch = image.crop((x, y, x + patch_size, y + patch_size))
+#         patches.append(transform(patch))
+#     return torch.stack(patches)
+
+
 def get_real_patches(image_path, num_patches=16, patch_size=64):
-    image = Image.open(image_path).convert('RGB')
-    transform = transforms.ToTensor()
-    w, h = image.size
+    # 1. Load image and convert to numpy array to inspect raw bit depth
+    img = Image.open(image_path)
+    img_np = np.array(img)
     
+    # 2. Handle channels if RGB
+    if img_np.ndim == 3:
+        img_np = np.mean(img_np, axis=-1)
+        
+    # 3. Normalize correctly based on bit-depth (Matching your training script)
+    if img.mode.startswith('I') or img_np.dtype == np.uint16 or img_np.dtype == np.int32:
+        img_np = img_np.astype(np.float32) / 65535.0
+    else:
+        img_np = img_np.astype(np.float32) / 255.0
+        
+    # 4. Convert to tensor: [1, H, W]
+    img_tensor = torch.from_numpy(img_np).unsqueeze(0)
+    _, h, w = img_tensor.shape
+    
+    # 5. Extract random crops
     patches = []
     for _ in range(num_patches):
         x = random.randint(0, max(0, w - patch_size))
         y = random.randint(0, max(0, h - patch_size))
-        patch = image.crop((x, y, x + patch_size, y + patch_size))
-        patches.append(transform(patch))
+        
+        # TF.crop takes (top, left, height, width) which is (y, x, h, w)
+        patch = TF.crop(img_tensor, y, x, patch_size, patch_size)
+        patches.append(patch)
         
     return torch.stack(patches)
 
@@ -109,11 +145,11 @@ def get_real_patches(image_path, num_patches=16, patch_size=64):
 def evaluate_checkpoint(checkpoint_path, original_image_path, output_image_path="eval_result.png", device='cuda'):
     print(f"Loading checkpoint: {checkpoint_path}")
     
-    # Initialize the EXACT SAME UNet2DModel used in your training script
+    # FIX 3: Change in_channels and out_channels to 1
     model = UNet2DModel(
         sample_size=64,           
-        in_channels=3,            
-        out_channels=3,           
+        in_channels=1,            # Changed from 3 to 1
+        out_channels=1,           # Changed from 3 to 1
         layers_per_block=2,       
         block_out_channels=(64, 128, 256, 512), 
         down_block_types=(
@@ -148,7 +184,7 @@ def evaluate_checkpoint(checkpoint_path, original_image_path, output_image_path=
     # Extract 16 real patches from the original image
     real_patches = get_real_patches(original_image_path, num_patches=16)
     
-    # Create an image grid
+    # Create an image grid (make_grid automatically handles 1-channel by repeating it to 3 for visualization)
     gen_grid = make_grid(generated_patches.cpu(), nrow=4, padding=2)
     real_grid = make_grid(real_patches.cpu(), nrow=4, padding=2)
     
@@ -156,11 +192,11 @@ def evaluate_checkpoint(checkpoint_path, original_image_path, output_image_path=
     fig, axes = plt.subplots(1, 2, figsize=(12, 6))
     
     # Matplotlib expects channel-last format: [H, W, C]
-    axes[0].imshow(real_grid.permute(1, 2, 0).numpy())
+    axes[0].imshow(real_grid.permute(1, 2, 0).numpy(), cmap='gray')
     axes[0].set_title("Real Image Patches")
     axes[0].axis('off')
     
-    axes[1].imshow(gen_grid.permute(1, 2, 0).numpy())
+    axes[1].imshow(gen_grid.permute(1, 2, 0).numpy(), cmap='gray')
     axes[1].set_title("Generated Patches (From Checkpoint)")
     axes[1].axis('off')
     
@@ -170,15 +206,15 @@ def evaluate_checkpoint(checkpoint_path, original_image_path, output_image_path=
 
 if __name__ == "__main__":
     # Point this to one of your generated checkpoints
-    checkpoint_file = "pd_checkpoints_diffuser/pd_model_step_180000.pth" 
-    original_image = "data/images/lena_color.tiff"
+    checkpoint_file = "pd_checkpoints_diffuser/pd_model_step_200000.pth" 
+    original_image = "data/images/lena_gray16.tiff"
     
     # Ensure the file exists before evaluating
     if os.path.exists(checkpoint_file):
         evaluate_checkpoint(
             checkpoint_path=checkpoint_file, 
             original_image_path=original_image,
-            output_image_path="evaluation_diffuser_200k.png"
+            output_image_path="evaluation_diffuser_200k_lena_gray.png"
         )
     else:
         print(f"Checkpoint not found at {checkpoint_file}. Please check the path.")
