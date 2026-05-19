@@ -11,38 +11,17 @@ The pipeline leverages cross-scale patch consistency and consists of two sequent
 **Phase 2 (Blind SR & Kernel Estimation)**: Performs joint optimization. The trained PD model acts as a prior to guide the HR estimation toward the correct patch distribution. Simultaneously, a refinement U-Net and a SIREN (Sinusoidal Representation Network) implicit kernel representation are trained under a consistency loss to ensure that convolving the predicted HR image with the estimated kernel perfectly reproduces the original LR input.
 
 ## Usage
-The process operates strictly on a per-image, zero-shot basis. Follow the steps below in order to process a target low-resolution image.
 
-### Phase 1: Patch Diffusion
-1. Train the Patch Diffusion Model 
-Extracts patches from the target image and trains the diffusion prior.
+The pipeline operates strictly on a per-image, zero-shot basis. Parameters (like input image paths and checkpoints) are set directly inside the `__main__` blocks of each script. 
 
-```
-python phase1_train_patch_diffusion.py \
-    --input_image ./data/lr_image.png \
-    --output_dir ./checkpoints/phase1/ \
-    --num_steps 5000 \
-    --batch_size 16
-```
+To process an image, edit the file paths in the scripts as needed, and then execute them in the following order:
 
-2. Evaluate the Patch Diffusion Model (Optional but recommended) 
-Verifies that the diffusion model has successfully learned the internal patch statistics before moving to the heavier Phase 2 optimization.
+```bash
+# 1. Train the image-specific patch diffusion prior
+python phase1_train_patch_diffusion.py
 
-```
-python phase1_evaluate_patch_diffusion.py \
-    --input_image ./data/lr_image.png \
-    --checkpoint ./checkpoints/phase1/patch_diffusion.pth \
-    --results_dir ./results/phase1_eval/
-```
+# 2. (Optional) Evaluate the learned patch statistics
+python phase1_evaluate_patch_diffusion.py
 
-### Phase 2: Joint Super-Resolution and Kernel Estimation
-3. Run the Super-Resolution Pipeline 
-This script initializes the U-Net and SIREN components, leveraging the pre-trained Phase 1 weights to enforce patch consistency while recovering the unrestricted degradation kernel.
-
-```
-python phase2_superresolution.py \
-    --input_image ./data/lr_image.png \
-    --pd_checkpoint ./checkpoints/phase1/patch_diffusion.pth \
-    --scale_factor 4 \
-    --output_dir ./results/phase2_final/
-```
+# 3. Run the joint U-Net + SIREN optimization for super-resolution
+python phase2_superresolution.py
